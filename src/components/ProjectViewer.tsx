@@ -107,20 +107,32 @@ export function ProjectViewer() {
                     fileMap.set(file.name, new Blob([file.buffer], { type: mimeType }));
                 });
 
-                // 6. Send the file map to the Service Worker
-                const channel = new BroadcastChannel('file-transfer');
-                channel.postMessage(fileMap);
-                //channel.close();
+                // 6. Use a MessageChannel for direct communication with the Service Worker
+                const messageChannel = new MessageChannel();
 
-                // 7. Wait for channel to respond
-                channel.addEventListener('message', (event) => {
-                    if (event.data === 'ready') {
+                // 7. Listen for a confirmation message from the SW
+                messageChannel.port1.onmessage = (event) => {
+                    if (event.data && event.data.type === 'FILE_MAP_SET') {
+                        console.log('[ProjectViewer] Service Worker has confirmed receipt of the file map.');
                         // 8. Set the iframe source to the entry point within our virtual scope
                         setIframeSrc(SCOPE_PREFIX + 'index.html');
                         setStatus('success');
-                        channel.close();
+                        messageChannel.port1.close(); // Clean up the port
                     }
-                });
+                };
+
+                // 9. Send the file map to the active Service Worker
+                if (navigator.serviceWorker.controller) {
+                    navigator.serviceWorker.controller.postMessage(
+                        {
+                            type: 'SET_FILE_MAP',
+                            fileMap: fileMap,
+                        },
+                        [messageChannel.port2] // Transfer port2 to the service worker
+                    );
+                } else {
+                    throw new Error("Service worker is not active or not controlling the page.");
+                }
 
 
 
