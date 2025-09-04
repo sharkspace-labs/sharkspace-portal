@@ -66,7 +66,10 @@ export function ProjectViewer() {
                 const swUrl = `${basePath.replace(/\/$/, '')}/sw.js`;
                 const registration = await navigator.serviceWorker.register(swUrl);
                 await navigator.serviceWorker.ready;
-                console.log('Service Worker is active.');
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Give SW time to initialize
+                if (registration.active) {
+                    console.log('Service Worker is active.');
+                }
             } catch (error) {
                 setErrorMessage('Could not register the service worker, which is required for project routing.');
                 return setStatus('error');
