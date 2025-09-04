@@ -1,0 +1,10 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { ProjectViewer } from '../components/ProjectViewer';
+---
+
+<Layout title="Project Viewer | SharkSpace Labs">
+	<main>
+		<ProjectViewer client:only="react" />
+	</main>
+</Layout>
