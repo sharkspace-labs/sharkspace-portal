@@ -98,9 +98,21 @@ export function ProjectViewer() {
 
                 // 5. Unpack the TAR archive
                 setStatus('unpacking');
+
+                const baseTag = `<base href="${SCOPE_PREFIX}">`;
+
                 const files = await untar(decryptedTarBuffer); // untar.js returns a promise
                 const fileMap = new Map<string, Blob>();
                 files.forEach(file => {
+
+                    if (file.name.endsWith('.html')) {
+                        // Convert buffer to string to inject the base tag
+                        const htmlAsString = new TextDecoder().decode(file.buffer);
+                        const modifiedHtml = htmlAsString.replace(/<head[^>]*>/i, `$&${baseTag}`);
+                        file.buffer = new TextEncoder().encode(modifiedHtml);
+                    }
+
+
                     const normalizedPath = file.name.replace(/^\.\//, '');
                     console.log(`Unpacked: ${normalizedPath}`);
                     // Create a Blob with the correct MIME type if possible
