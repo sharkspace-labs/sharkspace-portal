@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { WifiOff, ShieldOff, Loader, AlertTriangle, CheckCircle, ServerCrash } from 'lucide-react';
+import untar from "js-untar";
 
-type Status = 'checking' | 'unsupported' | 'insecure' | 'loading' | 'decrypting' | 'error' | 'success';
+type Status = 'checking' | 'unsupported' | 'insecure' | 'registering_sw' | 'loading' | 'decrypting' | 'unpacking' | 'error' | 'success';
 
 // --- Helper to convert a hex string to a Uint8Array ---
 function hexToUint8Array(hex: string): Uint8Array {
@@ -23,61 +24,28 @@ function concatUint8Arrays(a: Uint8Array, b: Uint8Array): Uint8Array {
 }
 
 // --- The Core Decryption Logic (Browser-Compatible) ---
-async function decryptProject(password: string, encryptedDataBlob: string): Promise<string> {
+async function decryptPackage(password: string, encryptedDataBlob: string): Promise<ArrayBuffer> {
   const KEY_DERIVATION_ITERATIONS = 120000;
-  
-  // --- First Decryption (Blob -> JSON) ---
-  const [jsonSaltHex, jsonIvHex, jsonAuthTagHex, encryptedJsonHex] = encryptedDataBlob.split('.');
-  
-  const jsonSalt = hexToUint8Array(jsonSaltHex);
-  const jsonIv = hexToUint8Array(jsonIvHex);
-  const jsonAuthTag = hexToUint8Array(jsonAuthTagHex);
-  const encryptedJson = hexToUint8Array(encryptedJsonHex);
+  const [saltHex, ivHex, authTagHex, encryptedArchiveHex] = encryptedDataBlob.split('.');
 
-  const jsonKey = await crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: jsonSalt as BufferSource, iterations: KEY_DERIVATION_ITERATIONS, hash: "SHA-256" },
+  const salt = hexToUint8Array(saltHex);
+  const iv = hexToUint8Array(ivHex);
+  const authTag = hexToUint8Array(authTagHex);
+  const encryptedArchive = hexToUint8Array(encryptedArchiveHex);
+
+  const key = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: salt as BufferSource, iterations: KEY_DERIVATION_ITERATIONS, hash: "SHA-256" },
     await crypto.subtle.importKey("raw", new TextEncoder().encode(password), { name: "PBKDF2" }, false, ["deriveKey"]),
     { name: "AES-GCM", length: 256 },
     false,
     ["decrypt"]
   );
 
-  const combinedJsonBuffer = concatUint8Arrays(encryptedJson, jsonAuthTag);
-
-  const decryptedJsonBuffer = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: jsonIv as BufferSource },
-    jsonKey,
-    combinedJsonBuffer as BufferSource
-  );
-
-  const projectData = JSON.parse(new TextDecoder().decode(decryptedJsonBuffer));
-
-  // --- Second Decryption (JSON -> HTML) ---
-  const { salt: htmlSaltHex, iv: htmlIvHex, authTag: htmlAuthTagHex, ciphertext: htmlCiphertextHex } = projectData;
-  
-  const htmlSalt = hexToUint8Array(htmlSaltHex);
-  const htmlIv = hexToUint8Array(htmlIvHex);
-  const htmlAuthTag = hexToUint8Array(htmlAuthTagHex);
-  const encryptedHtml = hexToUint8Array(htmlCiphertextHex);
-  
-  const htmlKey = await crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: htmlSalt as BufferSource, iterations: KEY_DERIVATION_ITERATIONS, hash: "SHA-256" },
-    await crypto.subtle.importKey("raw", new TextEncoder().encode(password), { name: "PBKDF2" }, false, ["deriveKey"]),
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["decrypt"]
-  );
-
-  const combinedHtmlBuffer = concatUint8Arrays(encryptedHtml, htmlAuthTag);
-
-  const decryptedHtmlBuffer = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: htmlIv as BufferSource },
-    htmlKey,
-    combinedHtmlBuffer as BufferSource
-  );
-
-  return new TextDecoder().decode(decryptedHtmlBuffer);
+  const combinedBuffer = concatUint8Arrays(encryptedArchive, authTag);
+  return crypto.subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, combinedBuffer as BufferSource);
 }
+ 
+const SCOPE_PREFIX = '/portal-scope/';
 
 export function ProjectViewer() {
   const [status, setStatus] = useState<Status>('checking');
@@ -86,9 +54,25 @@ export function ProjectViewer() {
 
   useEffect(() => {
     const loadProject = async () => {
+      // 1. Prerequisite Checks
       if (!crypto?.subtle) return setStatus('unsupported');
+      if (!('serviceWorker' in navigator)) return setStatus('unsupported');
       if (!window.isSecureContext) return setStatus('insecure');
 
+      // 2. Register the Service Worker
+      try {
+        setStatus('registering_sw');
+        const registration = await navigator.serviceWorker.register('/sw.js');
+        await navigator.serviceWorker.ready; // Ensure it's active
+        if (registration.active) {
+          console.log('Service Worker is active.');
+        }
+      } catch (error) {
+        setErrorMessage('Could not register the service worker, which is required for project routing.');
+        return setStatus('error');
+      }
+
+      // 3. Get credentials from URL
       const params = new URLSearchParams(window.location.search);
       const projectId = params.get('id');
       const password = params.get('pwd');
@@ -99,51 +83,72 @@ export function ProjectViewer() {
       }
 
       try {
+        // 4. Fetch and Decrypt Package
         setStatus('loading');
-        const response = await fetch(`../projects/${projectId}/data.enc`);
-        if (response.status === 404) {
-          setErrorMessage(`A project with the ID '${projectId}' could not be found.`);
-          return setStatus('error');
-        }
-        if (!response.ok) throw new Error('Failed to fetch project data.');
-
+        const response = await fetch(`/projects/${projectId}/data.pkg`);
+        if (!response.ok) throw new Error(`Project '${projectId}' not found.`);
         const encryptedDataBlob = await response.text();
         
         setStatus('decrypting');
-        const decryptedHtml = await decryptProject(password, encryptedDataBlob);
+        const decryptedTarBuffer = await decryptPackage(password, encryptedDataBlob);
 
-        const blob = new Blob([decryptedHtml], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        setIframeSrc(url);
+        // 5. Unpack the TAR archive
+        setStatus('unpacking');
+        const files = await untar(decryptedTarBuffer); // untar.js returns a promise
+        const fileMap = new Map<string, Blob>();
+        files.forEach(file => {
+          console.log(`Unpacked: ${file.name}`);
+          // Create a Blob with the correct MIME type if possible
+          const mimeType = getMimeType(file.name);
+          fileMap.set(file.name, new Blob([file.buffer], { type: mimeType }));
+        });
+
+        // 6. Send the file map to the Service Worker
+        const channel = new BroadcastChannel('file-transfer');
+        channel.postMessage(fileMap);
+        channel.close();
+
+        // 7. Set the iframe source to the entry point within our virtual scope
+        setIframeSrc(SCOPE_PREFIX + 'index.html');
         setStatus('success');
 
       } catch (err) {
-        console.error("Decryption failed:", err);
-        setErrorMessage("Decryption failed. Please double-check your password and Project ID.");
+        console.error("Process failed:", err);
+        setErrorMessage("Decryption or unpacking failed. Please check credentials and package integrity.");
         setStatus('error');
       }
     };
 
     loadProject();
-
-    return () => {
-      if (iframeSrc) URL.revokeObjectURL(iframeSrc);
-    };
   }, []);
 
+  const getMimeType = (filename: string): string => {
+    if (filename.endsWith('.html')) return 'text/html';
+    if (filename.endsWith('.css')) return 'text/css';
+    if (filename.endsWith('.js')) return 'application/javascript';
+    if (filename.endsWith('.png')) return 'image/png';
+    if (filename.endsWith('.jpg') || filename.endsWith('.jpeg')) return 'image/jpeg';
+    if (filename.endsWith('.svg')) return 'image/svg+xml';
+    return 'application/octet-stream';
+  };
 
+  // The renderStatus switch and JSX are updated for new statuses
   const renderStatus = () => {
     switch (status) {
       case 'unsupported':
-        return <StatusDisplay icon={<ShieldOff/>} title="Unsupported Browser" message="The Web Crypto API is required. Please use a modern browser like Chrome, Firefox, or Safari."/>;
+        return <StatusDisplay icon={<ShieldOff/>} title="Unsupported Browser" message="This feature requires a modern browser with Service Worker and Web Crypto API support."/>;
       case 'insecure':
-        return <StatusDisplay icon={<WifiOff/>} title="Insecure Connection" message="Decryption requires a secure (HTTPS) connection to protect your credentials."/>;
+        return <StatusDisplay icon={<WifiOff/>} title="Insecure Connection" message="Secure project viewing requires an HTTPS connection."/>;
+      case 'registering_sw':
+        return <StatusDisplay icon={<Loader className="animate-spin"/>} title="Initializing Secure Environment..."/>;
       case 'loading':
-        return <StatusDisplay icon={<Loader className="animate-spin"/>} title="Loading Project Data..."/>;
+        return <StatusDisplay icon={<Loader className="animate-spin"/>} title="Loading Project Package..."/>;
       case 'decrypting':
-        return <StatusDisplay icon={<Loader className="animate-spin"/>} title="Decrypting Project..."/>;
+        return <StatusDisplay icon={<Loader className="animate-spin"/>} title="Decrypting Package..."/>;
+      case 'unpacking':
+        return <StatusDisplay icon={<Loader className="animate-spin"/>} title="Unpacking Project Files..."/>;
       case 'error':
-        return <StatusDisplay icon={<AlertTriangle/>} title="Access Denied" message={errorMessage} isError={true}/>;
+        return <StatusDisplay icon={<AlertTriangle/>} title="An Error Occurred" message={errorMessage} isError={true}/>;
       default:
         return null;
     }
