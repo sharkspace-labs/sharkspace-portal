@@ -68,6 +68,7 @@ export function ProjectViewer() {
           console.log('Service Worker is active.');
         }
       } catch (error) {
+        console.error("Service Worker registration failed:", error);
         setErrorMessage('Could not register the service worker, which is required for project routing.');
         return setStatus('error');
       }
