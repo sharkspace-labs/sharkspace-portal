@@ -62,7 +62,7 @@ export function ProjectViewer() {
       // 2. Register the Service Worker
       try {
         setStatus('registering_sw');
-        const registration = await navigator.serviceWorker.register('/sw.js');
+        const registration = await navigator.serviceWorker.register('/sharkspace-portal/sw.js');
         await navigator.serviceWorker.ready; // Ensure it's active
         if (registration.active) {
           console.log('Service Worker is active.');
