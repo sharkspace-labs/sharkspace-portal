@@ -6,6 +6,7 @@ const channel = new BroadcastChannel('file-transfer');
 channel.onmessage = (event) => {
   console.log('[SW] File map received.');
   fileMap = event.data;
+  channel.postMessage('ready');
 };
 
 self.addEventListener('install', (event) => {

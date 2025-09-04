@@ -110,11 +110,20 @@ export function ProjectViewer() {
                 // 6. Send the file map to the Service Worker
                 const channel = new BroadcastChannel('file-transfer');
                 channel.postMessage(fileMap);
-                channel.close();
+                //channel.close();
 
-                // 7. Set the iframe source to the entry point within our virtual scope
-                setIframeSrc(SCOPE_PREFIX + 'index.html');
-                setStatus('success');
+                // 7. Wait for channel to respond
+                channel.addEventListener('message', (event) => {
+                    if (event.data === 'ready') {
+                        // 8. Set the iframe source to the entry point within our virtual scope
+                        setIframeSrc(SCOPE_PREFIX + 'index.html');
+                        setStatus('success');
+                        channel.close();
+                    }
+                });
+
+
+
 
             } catch (err) {
                 console.error("Process failed:", err);
