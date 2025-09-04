@@ -40,7 +40,7 @@ self.addEventListener('fetch', (event) => {
       // Extract the filename by getting the substring after the virtual scope part.
       // e.g., '/sharkspace-portal/portal-scope/about.html' -> 'about.html'
       
-    let normalizedPath = path.substring(scopeIndex + VIRTUAL_SCOPE.length).name.replace(/^\.\//, '');
+    let normalizedPath = path.substring(scopeIndex + VIRTUAL_SCOPE.length).replace(/^\.\//, '');
      
       if (normalizedPath === '') {
         normalizedPath = 'index.html';
