@@ -25,7 +25,7 @@ const LoginForm = () => {
     document.cookie = `lastPresent=${new Date().toISOString()}; expires=${oneYearFromNow.toUTCString()}; path=/`;
     
     // Redirect to the portal page with credentials in the query string
-    window.location.href = `/portal?id=${encodeURIComponent(projectId)}&pwd=${encodeURIComponent(password)}`;
+    window.location.href = `/sharkspace-portal/portal?id=${encodeURIComponent(projectId)}&pwd=${encodeURIComponent(password)}`;
   };
 
   return (

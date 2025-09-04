@@ -100,7 +100,7 @@ export function ProjectViewer() {
 
       try {
         setStatus('loading');
-        const response = await fetch(`/projects/${projectId}/data.enc`);
+        const response = await fetch(`sharkspace-portal/projects/${projectId}/data.enc`);
         if (response.status === 404) {
           setErrorMessage(`A project with the ID '${projectId}' could not be found.`);
           return setStatus('error');
