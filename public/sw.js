@@ -39,9 +39,9 @@ self.addEventListener('fetch', (event) => {
 
       // Extract the filename by getting the substring after the virtual scope part.
       // e.g., '/sharkspace-portal/portal-scope/about.html' -> 'about.html'
-      let filePath = path.substring(scopeIndex + VIRTUAL_SCOPE.length);
-      if (filePath === '' || filePath.endsWith('/')) {
-        filePath += 'index.html';
+      let filePath = path.substring(scopeIndex + VIRTUAL_SCOPE.length).split('/').pop() || 'index.html';
+      if (filePath === '') {
+        filePath = 'index.html';
       }
 
       const fileBlob = fileMap.get(filePath);
