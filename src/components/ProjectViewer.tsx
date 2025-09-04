@@ -100,16 +100,24 @@ export function ProjectViewer() {
                 setStatus('unpacking');
 
                 const baseTag = `<base href="${SCOPE_PREFIX}">`;
+                const linkFixerRegex = /(href|src)=["']\/([^/][^"']*)["']/g;
 
                 const files = await untar(decryptedTarBuffer); // untar.js returns a promise
                 const fileMap = new Map<string, Blob>();
                 files.forEach(file => {
 
-                    if (file.name.endsWith('.html')) {
-                        // Convert buffer to string to inject the base tag
-                        const htmlAsString = new TextDecoder().decode(file.buffer);
-                        const modifiedHtml = htmlAsString.replace(/<head[^>]*>/i, `$&${baseTag}`);
-                        file.buffer = new TextEncoder().encode(modifiedHtml);
+                    if (file.name.endsWith('.html') || file.name.endsWith('.css')) {
+                        let contentAsString = new TextDecoder().decode(file.buffer);
+
+                        // Dynamically convert root-relative paths to relative paths
+                        contentAsString = contentAsString.replace(linkFixerRegex, '$1="$2"');
+
+                        if (file.name.endsWith('.html')) {
+                            // Inject the <base> tag right after the opening <head> tag
+                            contentAsString = contentAsString.replace(/<head[^>]*>/i, `$&${baseTag}`);
+                        }
+
+                        file.buffer = new TextEncoder().encode(contentAsString);
                     }
 
 
