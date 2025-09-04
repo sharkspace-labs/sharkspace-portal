@@ -101,10 +101,11 @@ export function ProjectViewer() {
                 const files = await untar(decryptedTarBuffer); // untar.js returns a promise
                 const fileMap = new Map<string, Blob>();
                 files.forEach(file => {
-                    console.log(`Unpacked: ${file.name}`);
+                    const normalizedPath = file.name.replace(/^\.\//, '');
+                    console.log(`Unpacked: ${normalizedPath}`);
                     // Create a Blob with the correct MIME type if possible
                     const mimeType = getMimeType(file.name);
-                    fileMap.set(file.name, new Blob([file.buffer], { type: mimeType }));
+                    fileMap.set(normalizedPath, new Blob([file.buffer], { type: mimeType }));
                 });
 
                 // 6. Use a MessageChannel for direct communication with the Service Worker

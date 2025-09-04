@@ -39,18 +39,20 @@ self.addEventListener('fetch', (event) => {
 
       // Extract the filename by getting the substring after the virtual scope part.
       // e.g., '/sharkspace-portal/portal-scope/about.html' -> 'about.html'
-      let filePath = path.substring(scopeIndex + VIRTUAL_SCOPE.length).split('/').pop() || 'index.html';
-      if (filePath === '') {
-        filePath = 'index.html';
+      
+    let normalizedPath = path.substring(scopeIndex + VIRTUAL_SCOPE.length).name.replace(/^\.\//, '');
+     
+      if (normalizedPath === '') {
+        normalizedPath = 'index.html';
       }
 
-      const fileBlob = fileMap.get(filePath);
+      const fileBlob = fileMap.get(normalizedPath);
 
       if (fileBlob) {
-        console.log(`[SW] Serving virtual file: ${filePath}`);
+        console.log(`[SW] Serving virtual file: ${normalizedPath}`);
         return new Response(fileBlob);
       } else {
-        console.error(`[SW] Virtual file not found: ${filePath}`);
+        console.error(`[SW] Virtual file not found: ${normalizedPath}`);
         return new Response('File not found in virtual project.', { status: 404 });
       }
     })());
