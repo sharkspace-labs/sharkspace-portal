@@ -86,7 +86,7 @@ export function ProjectViewer() {
       try {
         // 4. Fetch and Decrypt Package
         setStatus('loading');
-        const response = await fetch(`/projects/${projectId}/data.pkg`);
+        const response = await fetch(`/sharkspace-portal/projects/${projectId}/data.pkg`);
         if (!response.ok) throw new Error(`Project '${projectId}' not found.`);
         const encryptedDataBlob = await response.text();
         
