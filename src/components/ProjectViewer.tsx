@@ -7,196 +7,196 @@ type Status = 'checking' | 'unsupported' | 'insecure' | 'registering_sw' | 'load
 
 // --- Helper to convert a hex string to a Uint8Array ---
 function hexToUint8Array(hex: string): Uint8Array {
-  const bytes = hex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16));
-  const buffer = new ArrayBuffer(bytes.length);
-  const view = new Uint8Array(buffer);
-  bytes.forEach((byte, i) => view[i] = byte);
-  return view;
+    const bytes = hex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16));
+    const buffer = new ArrayBuffer(bytes.length);
+    const view = new Uint8Array(buffer);
+    bytes.forEach((byte, i) => view[i] = byte);
+    return view;
 }
 
 // --- BROWSER-COMPATIBLE HELPER to concatenate Uint8Arrays ---
 function concatUint8Arrays(a: Uint8Array, b: Uint8Array): Uint8Array {
-  const buffer = new ArrayBuffer(a.length + b.length);
-  const result = new Uint8Array(buffer);
-  result.set(a, 0);
-  result.set(b, a.length);
-  return result;
+    const buffer = new ArrayBuffer(a.length + b.length);
+    const result = new Uint8Array(buffer);
+    result.set(a, 0);
+    result.set(b, a.length);
+    return result;
 }
 
 // --- The Core Decryption Logic (Browser-Compatible) ---
 async function decryptPackage(password: string, encryptedDataBlob: string): Promise<ArrayBuffer> {
-  const KEY_DERIVATION_ITERATIONS = 120000;
-  const [saltHex, ivHex, authTagHex, encryptedArchiveHex] = encryptedDataBlob.split('.');
+    const KEY_DERIVATION_ITERATIONS = 120000;
+    const [saltHex, ivHex, authTagHex, encryptedArchiveHex] = encryptedDataBlob.split('.');
 
-  const salt = hexToUint8Array(saltHex);
-  const iv = hexToUint8Array(ivHex);
-  const authTag = hexToUint8Array(authTagHex);
-  const encryptedArchive = hexToUint8Array(encryptedArchiveHex);
+    const salt = hexToUint8Array(saltHex);
+    const iv = hexToUint8Array(ivHex);
+    const authTag = hexToUint8Array(authTagHex);
+    const encryptedArchive = hexToUint8Array(encryptedArchiveHex);
 
-  const key = await crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: salt as BufferSource, iterations: KEY_DERIVATION_ITERATIONS, hash: "SHA-256" },
-    await crypto.subtle.importKey("raw", new TextEncoder().encode(password), { name: "PBKDF2" }, false, ["deriveKey"]),
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["decrypt"]
-  );
+    const key = await crypto.subtle.deriveKey(
+        { name: "PBKDF2", salt: salt as BufferSource, iterations: KEY_DERIVATION_ITERATIONS, hash: "SHA-256" },
+        await crypto.subtle.importKey("raw", new TextEncoder().encode(password), { name: "PBKDF2" }, false, ["deriveKey"]),
+        { name: "AES-GCM", length: 256 },
+        false,
+        ["decrypt"]
+    );
 
-  const combinedBuffer = concatUint8Arrays(encryptedArchive, authTag);
-  return crypto.subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, combinedBuffer as BufferSource);
+    const combinedBuffer = concatUint8Arrays(encryptedArchive, authTag);
+    return crypto.subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, combinedBuffer as BufferSource);
 }
- 
-const SCOPE_PREFIX = '/portal-scope/';
+
+const SCOPE_PREFIX = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/portal-scope/`;
 
 export function ProjectViewer() {
-  const [status, setStatus] = useState<Status>('checking');
-  const [errorMessage, setErrorMessage] = useState('');
-  const [iframeSrc, setIframeSrc] = useState<string | null>(null);
+    const [status, setStatus] = useState<Status>('checking');
+    const [errorMessage, setErrorMessage] = useState('');
+    const [iframeSrc, setIframeSrc] = useState<string | null>(null);
+    const basePath = import.meta.env.BASE_URL;
 
-  useEffect(() => {
-    const loadProject = async () => {
-      // 1. Prerequisite Checks
-      if (!crypto?.subtle) return setStatus('unsupported');
-      if (!('serviceWorker' in navigator)) return setStatus('unsupported');
-      if (!window.isSecureContext) return setStatus('insecure');
+    useEffect(() => {
+        const loadProject = async () => {
+            // 1. Prerequisite Checks
+            if (!crypto?.subtle) return setStatus('unsupported');
+            if (!('serviceWorker' in navigator)) return setStatus('unsupported');
+            if (!window.isSecureContext) return setStatus('insecure');
 
-      // 2. Register the Service Worker
-      try {
-        setStatus('registering_sw');
-        const registration = await navigator.serviceWorker.register('/sharkspace-portal/sw.js');
-        await navigator.serviceWorker.ready; // Ensure it's active
-        if (registration.active) {
-          console.log('Service Worker is active.');
-        }
-      } catch (error) {
-        console.error("Service Worker registration failed:", error);
-        setErrorMessage('Could not register the service worker, which is required for project routing.');
-        return setStatus('error');
-      }
+            // 2. Register the Service Worker
+            try {
+                setStatus('registering_sw');
+                const swUrl = `${basePath.replace(/\/$/, '')}/sw.js`;
+                const registration = await navigator.serviceWorker.register(swUrl);
+                await navigator.serviceWorker.ready;
+                console.log('Service Worker is active.');
+            } catch (error) {
+                setErrorMessage('Could not register the service worker, which is required for project routing.');
+                return setStatus('error');
+            }
 
-      // 3. Get credentials from URL
-      const params = new URLSearchParams(window.location.search);
-      const projectId = params.get('id');
-      const password = params.get('pwd');
+            // 3. Get credentials from URL
+            const params = new URLSearchParams(window.location.search);
+            const projectId = params.get('id');
+            const password = params.get('pwd');
 
-      if (!projectId || !password) {
-        setErrorMessage('Project ID or password missing from URL.');
-        return setStatus('error');
-      }
+            if (!projectId || !password) {
+                setErrorMessage('Project ID or password missing from URL.');
+                return setStatus('error');
+            }
 
-      try {
-        // 4. Fetch and Decrypt Package
-        setStatus('loading');
-        const response = await fetch(`/sharkspace-portal/projects/${projectId}/data.pkg`);
-        if (!response.ok) throw new Error(`Project '${projectId}' not found.`);
-        const encryptedDataBlob = await response.text();
-        
-        setStatus('decrypting');
-        const decryptedTarBuffer = await decryptPackage(password, encryptedDataBlob);
+            try {
+                // 4. Fetch and Decrypt Package
+                setStatus('loading');
+                const pkgUrl = `${basePath.replace(/\/$/, '')}/projects/${projectId}/data.pkg`;
+                const response = await fetch(pkgUrl);
+                if (!response.ok) throw new Error(`Project '${projectId}' not found.`);
+                const encryptedDataBlob = await response.text();
 
-        // 5. Unpack the TAR archive
-        setStatus('unpacking');
-        const files = await untar(decryptedTarBuffer); // untar.js returns a promise
-        const fileMap = new Map<string, Blob>();
-        files.forEach(file => {
-          console.log(`Unpacked: ${file.name}`);
-          // Create a Blob with the correct MIME type if possible
-          const mimeType = getMimeType(file.name);
-          fileMap.set(file.name, new Blob([file.buffer], { type: mimeType }));
-        });
+                setStatus('decrypting');
+                const decryptedTarBuffer = await decryptPackage(password, encryptedDataBlob);
 
-        // 6. Send the file map to the Service Worker
-        const channel = new BroadcastChannel('file-transfer');
-        channel.postMessage(fileMap);
-        channel.close();
+                // 5. Unpack the TAR archive
+                setStatus('unpacking');
+                const files = await untar(decryptedTarBuffer); // untar.js returns a promise
+                const fileMap = new Map<string, Blob>();
+                files.forEach(file => {
+                    console.log(`Unpacked: ${file.name}`);
+                    // Create a Blob with the correct MIME type if possible
+                    const mimeType = getMimeType(file.name);
+                    fileMap.set(file.name, new Blob([file.buffer], { type: mimeType }));
+                });
 
-        // 7. Set the iframe source to the entry point within our virtual scope
-        setIframeSrc(SCOPE_PREFIX + 'index.html');
-        setStatus('success');
+                // 6. Send the file map to the Service Worker
+                const channel = new BroadcastChannel('file-transfer');
+                channel.postMessage(fileMap);
+                channel.close();
 
-      } catch (err) {
-        console.error("Process failed:", err);
-        setErrorMessage("Decryption or unpacking failed. Please check credentials and package integrity.");
-        setStatus('error');
-      }
+                // 7. Set the iframe source to the entry point within our virtual scope
+                setIframeSrc(SCOPE_PREFIX + 'index.html');
+                setStatus('success');
+
+            } catch (err) {
+                console.error("Process failed:", err);
+                setErrorMessage("Decryption or unpacking failed. Please check credentials and package integrity.");
+                setStatus('error');
+            }
+        };
+
+        loadProject();
+    }, []);
+
+    const getMimeType = (filename: string): string => {
+        if (filename.endsWith('.html')) return 'text/html';
+        if (filename.endsWith('.css')) return 'text/css';
+        if (filename.endsWith('.js')) return 'application/javascript';
+        if (filename.endsWith('.png')) return 'image/png';
+        if (filename.endsWith('.jpg') || filename.endsWith('.jpeg')) return 'image/jpeg';
+        if (filename.endsWith('.svg')) return 'image/svg+xml';
+        return 'application/octet-stream';
     };
 
-    loadProject();
-  }, []);
-
-  const getMimeType = (filename: string): string => {
-    if (filename.endsWith('.html')) return 'text/html';
-    if (filename.endsWith('.css')) return 'text/css';
-    if (filename.endsWith('.js')) return 'application/javascript';
-    if (filename.endsWith('.png')) return 'image/png';
-    if (filename.endsWith('.jpg') || filename.endsWith('.jpeg')) return 'image/jpeg';
-    if (filename.endsWith('.svg')) return 'image/svg+xml';
-    return 'application/octet-stream';
-  };
-
-  // The renderStatus switch and JSX are updated for new statuses
-  const renderStatus = () => {
-    switch (status) {
-      case 'unsupported':
-        return <StatusDisplay icon={<ShieldOff/>} title="Unsupported Browser" message="This feature requires a modern browser with Service Worker and Web Crypto API support."/>;
-      case 'insecure':
-        return <StatusDisplay icon={<WifiOff/>} title="Insecure Connection" message="Secure project viewing requires an HTTPS connection."/>;
-      case 'registering_sw':
-        return <StatusDisplay icon={<Loader className="animate-spin"/>} title="Initializing Secure Environment..."/>;
-      case 'loading':
-        return <StatusDisplay icon={<Loader className="animate-spin"/>} title="Loading Project Package..."/>;
-      case 'decrypting':
-        return <StatusDisplay icon={<Loader className="animate-spin"/>} title="Decrypting Package..."/>;
-      case 'unpacking':
-        return <StatusDisplay icon={<Loader className="animate-spin"/>} title="Unpacking Project Files..."/>;
-      case 'error':
-        return <StatusDisplay icon={<AlertTriangle/>} title="An Error Occurred" message={errorMessage} isError={true}/>;
-      default:
-        return null;
+    // The renderStatus switch and JSX are updated for new statuses
+    const renderStatus = () => {
+        switch (status) {
+            case 'unsupported':
+                return <StatusDisplay icon={<ShieldOff />} title="Unsupported Browser" message="This feature requires a modern browser with Service Worker and Web Crypto API support." />;
+            case 'insecure':
+                return <StatusDisplay icon={<WifiOff />} title="Insecure Connection" message="Secure project viewing requires an HTTPS connection." />;
+            case 'registering_sw':
+                return <StatusDisplay icon={<Loader className="animate-spin" />} title="Initializing Secure Environment..." />;
+            case 'loading':
+                return <StatusDisplay icon={<Loader className="animate-spin" />} title="Loading Project Package..." />;
+            case 'decrypting':
+                return <StatusDisplay icon={<Loader className="animate-spin" />} title="Decrypting Package..." />;
+            case 'unpacking':
+                return <StatusDisplay icon={<Loader className="animate-spin" />} title="Unpacking Project Files..." />;
+            case 'error':
+                return <StatusDisplay icon={<AlertTriangle />} title="An Error Occurred" message={errorMessage} isError={true} />;
+            default:
+                return null;
+        }
     }
-  }
 
-  return (
-    // --- MODIFICATION START ---
-    // The main container is now a flex column with a fixed height of 100vh.
-    // Padding constrains the content within the viewport.
-    // Conditional classes center the status messages, but are removed for the iframe.
-    <div className={`h-screen flex flex-col p-4 sm:p-6 md:p-8 bg-base text-text-body overflow-hidden ${status !== 'success' ? 'justify-center items-center' : ''}`}>
-      <AnimatePresence>
-        {status !== 'success' && (
-          <motion.div
-            key="status"
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-          >
-            {renderStatus()}
-          </motion.div>
-        )}
-      </AnimatePresence>
+    return (
+        // --- MODIFICATION START ---
+        // The main container is now a flex column with a fixed height of 100vh.
+        // Padding constrains the content within the viewport.
+        // Conditional classes center the status messages, but are removed for the iframe.
+        <div className={`h-screen flex flex-col p-4 sm:p-6 md:p-8 bg-base text-text-body overflow-hidden ${status !== 'success' ? 'justify-center items-center' : ''}`}>
+            <AnimatePresence>
+                {status !== 'success' && (
+                    <motion.div
+                        key="status"
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.9 }}
+                    >
+                        {renderStatus()}
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
-      {iframeSrc && (
-        // The iframe fades in and, because its parent is a flex container,
-        // it will automatically fill the available padded space.
-        <motion.iframe
-          key="project-iframe"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.5 }}
-          src={iframeSrc}
-          title="Client Project Viewer"
-          className="w-full h-full border-4 border-primary/50 rounded-lg bg-white"
-          sandbox="allow-scripts allow-same-origin allow-forms"
-        />
-      )}
-    </div>
-    // --- MODIFICATION END ---
-  );
+            {iframeSrc && (
+                // The iframe fades in and, because its parent is a flex container,
+                // it will automatically fill the available padded space.
+                <motion.iframe
+                    key="project-iframe"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.5 }}
+                    src={iframeSrc}
+                    title="Client Project Viewer"
+                    className="w-full h-full border-4 border-primary/50 rounded-lg bg-white"
+                    sandbox="allow-scripts allow-same-origin allow-forms"
+                />
+            )}
+        </div>
+        // --- MODIFICATION END ---
+    );
 }
 
 const StatusDisplay = ({ icon, title, message = '', isError = false }: { icon: React.ReactNode; title: string; message?: string; isError?: boolean }) => (
-  <div className={`flex flex-col items-center gap-4 text-center p-8 max-w-lg rounded-lg ${isError ? 'bg-red-500/5' : ''}`}>
-    <div className={isError ? 'text-red-400' : 'text-primary'}>{icon}</div>
-    <h2 className={`text-2xl font-display font-bold ${isError ? 'text-red-300' : 'text-text-heading'}`}>{title}</h2>
-    {message && <p className="text-text-body">{message}</p>}
-  </div>
+    <div className={`flex flex-col items-center gap-4 text-center p-8 max-w-lg rounded-lg ${isError ? 'bg-red-500/5' : ''}`}>
+        <div className={isError ? 'text-red-400' : 'text-primary'}>{icon}</div>
+        <h2 className={`text-2xl font-display font-bold ${isError ? 'text-red-300' : 'text-text-heading'}`}>{title}</h2>
+        {message && <p className="text-text-body">{message}</p>}
+    </div>
 );

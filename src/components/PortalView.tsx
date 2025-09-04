@@ -5,6 +5,7 @@ import { ArrowRight, LogIn, Info, Layers, Lightbulb, ShieldCheck, User } from 'l
 // --- Sub-component for the Login Form (with inline errors) ---
 const LoginForm = () => {
   const [error, setError] = useState<string>('');
+  const basePath = import.meta.env.BASE_URL; // Get the base path
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -25,8 +26,8 @@ const LoginForm = () => {
     document.cookie = `lastPresent=${new Date().toISOString()}; expires=${oneYearFromNow.toUTCString()}; path=/`;
     
     // Redirect to the portal page with credentials in the query string
-    window.location.href = `/sharkspace-portal/portal?id=${encodeURIComponent(projectId)}&pwd=${encodeURIComponent(password)}`;
-  };
+        const portalUrl = `${basePath.replace(/\/$/, '')}/portal?id=${encodeURIComponent(projectId)}&pwd=${encodeURIComponent(password)}`;
+    window.location.href = portalUrl;  };
 
   return (
     <motion.div
